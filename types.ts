@@ -14,8 +14,8 @@ export interface Match {
   courtId: string;
   teamAPlayers: [string, string];
   teamBPlayers: [string, string];
-  teamAScore: number;
-  teamBScore: number;
+  teamAScore: number | null;
+  teamBScore: number | null;
   date: string;
 }
 
@@ -25,4 +25,9 @@ export interface Ranking {
   matchesPlayed: number;
   wins: number;
   winPercentage: number;
+}
+
+export interface QueueItem {
+  id: string;
+  players: [string, string];
 }
