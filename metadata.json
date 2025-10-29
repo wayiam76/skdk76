@@ -1,5 +1,5 @@
 {
-  "name": "Badminton Group Manager",
+  "name": "HBT Court Manager",
   "description": "An application to manage badminton groups, including player management, court bookings, match recording, and player rankings based on win percentages.",
   "requestFramePermissions": []
 }
