@@ -3,10 +3,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Player, Court, Match, Ranking, QueueItem, Transaction } from './types';
 import Modal from './components/Modal';
-import { TrophyIcon, UsersIcon, CourtIcon, ClipboardListIcon, QueueListIcon, PlusIcon, TrashIcon, SearchIcon, EditIcon, AutoAssignIcon, DollarIcon } from './components/icons';
-
-// --- CONFIG ---
-const GAME_PRICE_PER_PLAYER = 2.50; // Set the cost for each player per game
+import { TrophyIcon, UsersIcon, CourtIcon, ClipboardListIcon, QueueListIcon, PlusIcon, TrashIcon, SearchIcon, EditIcon, AutoAssignIcon, DollarIcon, SettingsIcon } from './components/icons';
 
 // --- INITIAL DATA ---
 const INITIAL_PLAYERS: Player[] = [
@@ -37,7 +34,8 @@ enum Tab {
   PLAYERS,
   COURTS,
   MATCHES,
-  QUEUE
+  QUEUE,
+  SETTINGS
 }
 
 enum PlayerStatus {
@@ -102,6 +100,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // --- Admin & Fee Settings ---
+  const [joiningFee, setJoiningFee] = useState(10.00);
+  const [perGameFee, setPerGameFee] = useState(2.50);
+
   // Modal States
   const [isPlayerModalOpen, setPlayerModalOpen] = useState(false);
   const [isCourtModalOpen, setCourtModalOpen] = useState(false);
@@ -120,6 +122,7 @@ export default function App() {
   // Form States
   const [playerName, setPlayerName] = useState('');
   const [playerInitialBalance, setPlayerInitialBalance] = useState('0');
+  const [isJoiningFeePaid, setIsJoiningFeePaid] = useState(true);
   const [courtName, setCourtName] = useState('');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [matchForm, setMatchForm] = useState<MatchFormState>({
@@ -132,6 +135,14 @@ export default function App() {
     teamBScore: ''
   });
   const [queueForm, setQueueForm] = useState({ player1: '', player2: '' });
+  
+  // For new players, automatically set balance based on fee status
+  useEffect(() => {
+    if (!editingPlayer) {
+      setPlayerInitialBalance(isJoiningFeePaid ? '0' : String(-joiningFee));
+    }
+  }, [isJoiningFeePaid, joiningFee, editingPlayer]);
+
 
   const getPlayerDisplayName = useCallback((id: string) => {
     const player = players.find(p => p.id === id);
@@ -167,25 +178,30 @@ export default function App() {
   }, [players, matches, queue]);
 
 
-  // --- Automatic Match Creation from Queue ---
-  useEffect(() => {
-    const unscoredMatchCourtIds = new Set(matches.filter(m => m.teamAScore === null).map(m => m.courtId));
-    const availableCourtIds = courts.filter(c => !unscoredMatchCourtIds.has(c.id)).map(c => c.id);
-    
-    if (availableCourtIds.length > 0 && queue.length >= 2) {
-      const courtsToFill = [...availableCourtIds];
+  const unscoredMatchCourtIds = useMemo(() => 
+    new Set(matches.filter(m => m.teamAScore === null).map(m => m.courtId)),
+    [matches]);
+
+  const availableCourts = useMemo(() => 
+    courts.filter(c => !unscoredMatchCourtIds.has(c.id)),
+    [courts, unscoredMatchCourtIds]);
+
+
+  const handleAutoAssignMatches = useCallback(() => {
+    if (availableCourts.length > 0 && queue.length >= 2) {
+      const courtsToFill = [...availableCourts];
       const teamsToMatch = [...queue];
       const newMatches: Match[] = [];
       const teamsToRemove: string[] = [];
       
       while(courtsToFill.length > 0 && teamsToMatch.length >= 2) {
-        const courtId = courtsToFill.shift()!;
+        const court = courtsToFill.shift()!;
         const teamA = teamsToMatch.shift()!;
         const teamB = teamsToMatch.shift()!;
         
         const newMatch: Match = {
-          id: `m${Date.now()}-${courtId}`,
-          courtId,
+          id: `m${Date.now()}-${court.id}`,
+          courtId: court.id,
           teamAPlayers: teamA.players,
           teamBPlayers: teamB.players,
           teamAScore: null,
@@ -208,8 +224,7 @@ export default function App() {
         setQueue(prev => prev.filter(item => !teamsToRemove.includes(item.id)));
       }
     }
-  }, [matches, courts, queue, getCourtName, getPlayerDisplayName]);
-
+  }, [availableCourts, queue, getCourtName, getPlayerDisplayName]);
 
   // --- Modal Opening/Closing Handlers ---
 
@@ -217,6 +232,9 @@ export default function App() {
     setEditingPlayer(player);
     setPlayerName(player ? player.name : '');
     setPlayerInitialBalance(player ? String(player.balance) : '0');
+    if (!player) {
+        setIsJoiningFeePaid(true); // Reset for new player form
+    }
     setPlayerModalOpen(true);
   };
 
@@ -225,6 +243,7 @@ export default function App() {
     setEditingPlayer(null);
     setPlayerName('');
     setPlayerInitialBalance('0');
+    setIsJoiningFeePaid(true);
   };
 
   const openCourtModal = (court: Court | null = null) => {
@@ -463,9 +482,9 @@ export default function App() {
     const isNowScored = finalTeamAScore !== null;
 
     if (!wasScored && isNowScored) {
-        applyMatchFee(playersInMatch, -GAME_PRICE_PER_PLAYER, `Match fee on ${getCourtName(courtId)}`);
+        applyMatchFee(playersInMatch, -perGameFee, `Match fee on ${getCourtName(courtId)}`);
     } else if (wasScored && !isNowScored) {
-        applyMatchFee(playersInMatch, GAME_PRICE_PER_PLAYER, `Refund for match on ${getCourtName(courtId)}`);
+        applyMatchFee(playersInMatch, perGameFee, `Refund for match on ${getCourtName(courtId)}`);
     }
 
     if (editingMatch) {
@@ -498,7 +517,7 @@ export default function App() {
           const matchToDelete = matches.find(m => m.id === id);
           if (matchToDelete && matchToDelete.teamAScore !== null) {
               const playersInMatch = [...matchToDelete.teamAPlayers, ...matchToDelete.teamBPlayers];
-              applyMatchFee(playersInMatch, GAME_PRICE_PER_PLAYER, `Refund for deleted match on ${getCourtName(matchToDelete.courtId)}`);
+              applyMatchFee(playersInMatch, perGameFee, `Refund for deleted match on ${getCourtName(matchToDelete.courtId)}`);
           }
           setMatches(matches.filter(m => m.id !== id));
       }
@@ -597,12 +616,42 @@ export default function App() {
                 <MatchHistory matches={filteredMatches} getPlayerDisplayName={getPlayerDisplayName} getCourtName={getCourtName} onEdit={openMatchModal} onDelete={handleDeleteMatch} playerStatuses={playerStatuses} />
             </div>
         );
-      case Tab.QUEUE:
+      case Tab.QUEUE: {
+        const isAutoAssignDisabled = availableCourts.length === 0 || queue.length < 2;
         return (
             <div>
-                <ActionButton onClick={openQueueModal}>Add Team to Queue</ActionButton>
+                <div className="flex flex-wrap items-start gap-4 mb-4">
+                    <ActionButton onClick={openQueueModal}>Add Team to Queue</ActionButton>
+                    
+                    <div className="relative group"> {/* Tooltip container */}
+                        <button
+                            onClick={handleAutoAssignMatches}
+                            disabled={isAutoAssignDisabled}
+                            className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg disabled:bg-slate-600 disabled:cursor-not-allowed"
+                            aria-label="Auto-assign next match"
+                        >
+                            <AutoAssignIcon />
+                            <span className="ml-2">Auto-Assign Next Match</span>
+                        </button>
+                        {isAutoAssignDisabled && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-3 py-1 bg-slate-900 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                Needs at least 2 teams in queue and 1 available court.
+                            </div>
+                        )}
+                    </div>
+                </div>
                 <QueueList queue={filteredQueue} getPlayerDisplayName={getPlayerDisplayName} onRemove={handleRemoveFromQueue} playerStatuses={playerStatuses} />
             </div>
+        );
+      }
+      case Tab.SETTINGS:
+        return (
+            <SettingsPanel
+                joiningFee={joiningFee}
+                setJoiningFee={setJoiningFee}
+                perGameFee={perGameFee}
+                setPerGameFee={setPerGameFee}
+            />
         );
       default:
         return null;
@@ -668,6 +717,12 @@ export default function App() {
             isActive={activeTab === Tab.QUEUE}
             onClick={() => setActiveTab(Tab.QUEUE)}
           />
+          <TabButton
+            label="Settings"
+            icon={<SettingsIcon />}
+            isActive={activeTab === Tab.SETTINGS}
+            onClick={() => setActiveTab(Tab.SETTINGS)}
+          />
         </nav>
 
         <main className="bg-slate-800/50 p-4 sm:p-6 rounded-xl shadow-lg ring-1 ring-white/10">
@@ -682,10 +737,39 @@ export default function App() {
                   <label htmlFor="playerName" className="block text-sm font-medium text-slate-400 mb-1">Player Name</label>
                   <input id="playerName" type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="Player Name" className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" required />
               </div>
+              
+              {!editingPlayer && (
+                  <div className="flex items-center">
+                      <input
+                          id="feePaid"
+                          type="checkbox"
+                          checked={isJoiningFeePaid}
+                          onChange={(e) => setIsJoiningFeePaid(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-600 bg-slate-700 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      <label htmlFor="feePaid" className="ml-2 block text-sm text-slate-300">
+                          Joining Fee Paid
+                      </label>
+                  </div>
+              )}
+
               <div>
-                  <label htmlFor="initialBalance" className="block text-sm font-medium text-slate-400 mb-1">Initial Balance ($)</label>
-                  <input id="initialBalance" type="number" step="0.01" value={playerInitialBalance} onChange={(e) => setPlayerInitialBalance(e.target.value)} placeholder="0.00" className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" />
-                  <p className="text-xs text-slate-500 mt-1">Set a negative value to represent a joining fee owed.</p>
+                  <label htmlFor="initialBalance" className="block text-sm font-medium text-slate-400 mb-1">{editingPlayer ? 'Balance ($)' : 'Initial Balance ($)'}</label>
+                  <input 
+                    id="initialBalance" 
+                    type="number" 
+                    step="0.01" 
+                    value={playerInitialBalance} 
+                    onChange={(e) => setPlayerInitialBalance(e.target.value)} 
+                    placeholder="0.00" 
+                    className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none disabled:bg-slate-800 disabled:cursor-not-allowed"
+                    disabled={!editingPlayer}
+                  />
+                  {!editingPlayer ? (
+                      <p className="text-xs text-slate-500 mt-1">Balance is determined by the "Joining Fee Paid" status and the Joining Fee set in Settings.</p>
+                  ) : (
+                      <p className="text-xs text-slate-500 mt-1">Adjust the player's current balance.</p>
+                  )}
               </div>
               <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-md transition-colors">{editingPlayer ? "Save Changes" : "Add Player"}</button>
           </form>
@@ -810,6 +894,45 @@ export default function App() {
 }
 
 // --- Helper & UI Components ---
+const SettingsPanel: React.FC<{
+    joiningFee: number;
+    setJoiningFee: (fee: number) => void;
+    perGameFee: number;
+    setPerGameFee: (fee: number) => void;
+}> = ({ joiningFee, setJoiningFee, perGameFee, setPerGameFee }) => (
+    <div>
+        <h2 className="text-2xl font-bold text-cyan-400 mb-6">Fee Settings</h2>
+        <div className="max-w-md space-y-6">
+            <div>
+                <label htmlFor="joiningFee" className="block text-sm font-medium text-slate-400 mb-1">Joining Fee ($)</label>
+                <input
+                    id="joiningFee"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={joiningFee}
+                    onChange={(e) => setJoiningFee(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none"
+                />
+                <p className="text-xs text-slate-500 mt-1">Fee for new players. Set to 0 to disable.</p>
+            </div>
+            <div>
+                <label htmlFor="perGameFee" className="block text-sm font-medium text-slate-400 mb-1">Per-Game Fee (per player) ($)</label>
+                <input
+                    id="perGameFee"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={perGameFee}
+                    onChange={(e) => setPerGameFee(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none"
+                />
+                 <p className="text-xs text-slate-500 mt-1">Amount deducted from each player's balance after a scored match.</p>
+            </div>
+        </div>
+    </div>
+);
+
 const FinancialSummary: React.FC<{ players: Player[] }> = ({ players }) => {
   const { totalCredit, totalOwed } = useMemo(() => {
     return players.reduce(
@@ -866,7 +989,7 @@ const TabButton: React.FC<{ label: string; icon: React.ReactNode; isActive: bool
 );
 
 const ActionButton: React.FC<{ children: React.ReactNode; onClick: () => void }> = ({ children, onClick }) => (
-    <button onClick={onClick} className="mb-4 inline-flex items-center justify-center bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg">
+    <button onClick={onClick} className="inline-flex items-center justify-center bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg">
         <PlusIcon /> {children}
     </button>
 );
@@ -1160,7 +1283,6 @@ const PlayerSelect: React.FC<PlayerSelectProps> = ({ players, value, onChange, p
             const isDisabled = disabledPlayerIds.has(p.id);
             let statusText = '';
             if (status === PlayerStatus.PLAYING) statusText = ' (Playing)';
-            // FIX: Correctly reference the PlayerStatus enum instead of the Player type.
             if (status === PlayerStatus.IN_QUEUE) statusText = ' (In Queue)';
 
             return (
