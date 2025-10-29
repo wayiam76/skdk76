@@ -2,6 +2,7 @@ export interface Player {
   id: string;
   uniqueId: number;
   name: string;
+  balance: number;
 }
 
 export interface Court {
@@ -30,4 +31,12 @@ export interface Ranking {
 export interface QueueItem {
   id: string;
   players: [string, string];
+}
+
+export interface Transaction {
+  id: string;
+  playerId: string;
+  amount: number;
+  description: string;
+  date: string;
 }

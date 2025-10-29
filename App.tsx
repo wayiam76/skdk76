@@ -1,19 +1,23 @@
 
+
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Player, Court, Match, Ranking, QueueItem } from './types';
+import { Player, Court, Match, Ranking, QueueItem, Transaction } from './types';
 import Modal from './components/Modal';
-import { TrophyIcon, UsersIcon, CourtIcon, ClipboardListIcon, QueueListIcon, PlusIcon, TrashIcon, SearchIcon, EditIcon } from './components/icons';
+import { TrophyIcon, UsersIcon, CourtIcon, ClipboardListIcon, QueueListIcon, PlusIcon, TrashIcon, SearchIcon, EditIcon, AutoAssignIcon, DollarIcon } from './components/icons';
+
+// --- CONFIG ---
+const GAME_PRICE_PER_PLAYER = 2.50; // Set the cost for each player per game
 
 // --- INITIAL DATA ---
 const INITIAL_PLAYERS: Player[] = [
-  { id: 'p1', uniqueId: 1, name: 'Alice' },
-  { id: 'p2', uniqueId: 2, name: 'Bob' },
-  { id: 'p3', uniqueId: 3, name: 'Charlie' },
-  { id: 'p4', uniqueId: 4, name: 'Diana' },
-  { id: 'p5', uniqueId: 5, name: 'Ethan' },
-  { id: 'p6', uniqueId: 6, name: 'Fiona' },
-  { id: 'p7', uniqueId: 7, name: 'George' },
-  { id: 'p8', uniqueId: 8, name: 'Heidi' },
+  { id: 'p1', uniqueId: 1, name: 'Alice', balance: 10 },
+  { id: 'p2', uniqueId: 2, name: 'Bob', balance: -5 },
+  { id: 'p3', uniqueId: 3, name: 'Charlie', balance: 20 },
+  { id: 'p4', uniqueId: 4, name: 'Diana', balance: 0 },
+  { id: 'p5', uniqueId: 5, name: 'Ethan', balance: 0 },
+  { id: 'p6', uniqueId: 6, name: 'Fiona', balance: 15 },
+  { id: 'p7', uniqueId: 7, name: 'George', balance: -2.5 },
+  { id: 'p8', uniqueId: 8, name: 'Heidi', balance: 0 },
 ];
 
 const INITIAL_COURTS: Court[] = [
@@ -94,6 +98,7 @@ export default function App() {
   const [courts, setCourts] = useState<Court[]>(INITIAL_COURTS);
   const [matches, setMatches] = useState<Match[]>(INITIAL_MATCHES);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -102,17 +107,21 @@ export default function App() {
   const [isCourtModalOpen, setCourtModalOpen] = useState(false);
   const [isMatchModalOpen, setMatchModalOpen] = useState(false);
   const [isQueueModalOpen, setQueueModalOpen] = useState(false);
+  const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   const [matchAlert, setMatchAlert] = useState<{ courtName: string; teamA: [string, string]; teamB: [string, string] } | null>(null);
   const [matchModalError, setMatchModalError] = useState<string | null>(null);
   
-  // Editing States
+  // Editing & Form States
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [editingCourt, setEditingCourt] = useState<Court | null>(null);
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
-
+  const [payingPlayer, setPayingPlayer] = useState<Player | null>(null);
+  
   // Form States
   const [playerName, setPlayerName] = useState('');
+  const [playerInitialBalance, setPlayerInitialBalance] = useState('0');
   const [courtName, setCourtName] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
   const [matchForm, setMatchForm] = useState<MatchFormState>({
     courtId: '',
     teamAPlayer1: '',
@@ -185,20 +194,21 @@ export default function App() {
         };
         newMatches.push(newMatch);
         teamsToRemove.push(teamA.id, teamB.id);
-
-        setMatchAlert({
-            courtName: getCourtName(courtId),
-            teamA: [getPlayerDisplayName(teamA.players[0]), getPlayerDisplayName(teamA.players[1])],
-            teamB: [getPlayerDisplayName(teamB.players[0]), getPlayerDisplayName(teamB.players[1])]
-        });
       }
 
       if(newMatches.length > 0) {
+        const firstMatch = newMatches[0];
+        setMatchAlert({
+            courtName: getCourtName(firstMatch.courtId),
+            teamA: [getPlayerDisplayName(firstMatch.teamAPlayers[0]), getPlayerDisplayName(firstMatch.teamAPlayers[1])],
+            teamB: [getPlayerDisplayName(firstMatch.teamBPlayers[0]), getPlayerDisplayName(firstMatch.teamBPlayers[1])]
+        });
+
         setMatches(prev => [...newMatches, ...prev]);
         setQueue(prev => prev.filter(item => !teamsToRemove.includes(item.id)));
       }
     }
-  }, [matches, courts, queue, players, getCourtName, getPlayerDisplayName]);
+  }, [matches, courts, queue, getCourtName, getPlayerDisplayName]);
 
 
   // --- Modal Opening/Closing Handlers ---
@@ -206,6 +216,7 @@ export default function App() {
   const openPlayerModal = (player: Player | null = null) => {
     setEditingPlayer(player);
     setPlayerName(player ? player.name : '');
+    setPlayerInitialBalance(player ? String(player.balance) : '0');
     setPlayerModalOpen(true);
   };
 
@@ -213,6 +224,7 @@ export default function App() {
     setPlayerModalOpen(false);
     setEditingPlayer(null);
     setPlayerName('');
+    setPlayerInitialBalance('0');
   };
 
   const openCourtModal = (court: Court | null = null) => {
@@ -256,6 +268,17 @@ export default function App() {
       setQueueModalOpen(false);
       setQueueForm({ player1: '', player2: '' });
   }
+  
+  const openPaymentModal = (player: Player) => {
+      setPayingPlayer(player);
+      setPaymentModalOpen(true);
+  };
+  
+  const closePaymentModal = () => {
+      setPayingPlayer(null);
+      setPaymentAmount('');
+      setPaymentModalOpen(false);
+  };
 
   const rankings = useMemo<Ranking[]>(() => {
     const playerStats: { [key: string]: { wins: number; matchesPlayed: number } } = {};
@@ -347,16 +370,28 @@ export default function App() {
   const handleSavePlayer = (e: React.FormEvent) => {
     e.preventDefault();
     if (playerName.trim()) {
+      const balance = parseFloat(playerInitialBalance) || 0;
       if (editingPlayer) {
-        setPlayers(players.map(p => p.id === editingPlayer.id ? { ...p, name: playerName.trim() } : p));
+        setPlayers(players.map(p => p.id === editingPlayer.id ? { ...p, name: playerName.trim(), balance } : p));
       } else {
         const nextUniqueId = players.length > 0 ? Math.max(...players.map(p => p.uniqueId)) + 1 : 1;
         const newPlayer: Player = { 
           id: `p${Date.now()}`, 
           uniqueId: nextUniqueId,
-          name: playerName.trim() 
+          name: playerName.trim(),
+          balance
         };
         setPlayers([...players, newPlayer]);
+        if (balance !== 0) {
+            const newTransaction: Transaction = {
+                id: `t${Date.now()}`,
+                playerId: newPlayer.id,
+                amount: balance,
+                description: "Initial balance",
+                date: new Date().toISOString()
+            };
+            setTransactions(prev => [...prev, newTransaction]);
+        }
       }
       closePlayerModal();
     }
@@ -387,6 +422,23 @@ export default function App() {
           setCourts(courts.filter(c => c.id !== id));
       }
   }
+  
+  const applyMatchFee = (playerIds: string[], fee: number, description: string) => {
+      setPlayers(currentPlayers => 
+          currentPlayers.map(p => 
+              playerIds.includes(p.id) ? { ...p, balance: p.balance + fee } : p
+          )
+      );
+      const newTransactions = playerIds.map(pId => ({
+          id: `t${Date.now()}-${pId}`,
+          playerId: pId,
+          amount: fee,
+          description,
+          date: new Date().toISOString(),
+      }));
+      setTransactions(prev => [...prev, ...newTransactions]);
+  };
+
 
   const handleSaveMatch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,8 +452,21 @@ export default function App() {
     setMatchModalError(null);
 
     const { courtId, teamAPlayer1, teamAPlayer2, teamBPlayer1, teamBPlayer2, teamAScore, teamBScore } = matchForm;
+    
+    const playersInMatch = [teamAPlayer1, teamAPlayer2, teamBPlayer1, teamBPlayer2];
+    setQueue(prevQueue => prevQueue.filter(item => !item.players.some(p => playersInMatch.includes(p))));
+
     const finalTeamAScore = teamAScore.trim() !== '' ? Number(teamAScore) : null;
     const finalTeamBScore = teamBScore.trim() !== '' ? Number(teamBScore) : null;
+    
+    const wasScored = editingMatch && editingMatch.teamAScore !== null;
+    const isNowScored = finalTeamAScore !== null;
+
+    if (!wasScored && isNowScored) {
+        applyMatchFee(playersInMatch, -GAME_PRICE_PER_PLAYER, `Match fee on ${getCourtName(courtId)}`);
+    } else if (wasScored && !isNowScored) {
+        applyMatchFee(playersInMatch, GAME_PRICE_PER_PLAYER, `Refund for match on ${getCourtName(courtId)}`);
+    }
 
     if (editingMatch) {
         const updatedMatch: Match = {
@@ -430,6 +495,11 @@ export default function App() {
   
   const handleDeleteMatch = (id: string) => {
       if (window.confirm('Are you sure you want to delete this match record?')) {
+          const matchToDelete = matches.find(m => m.id === id);
+          if (matchToDelete && matchToDelete.teamAScore !== null) {
+              const playersInMatch = [...matchToDelete.teamAPlayers, ...matchToDelete.teamBPlayers];
+              applyMatchFee(playersInMatch, GAME_PRICE_PER_PLAYER, `Refund for deleted match on ${getCourtName(matchToDelete.courtId)}`);
+          }
           setMatches(matches.filter(m => m.id !== id));
       }
   }
@@ -459,6 +529,30 @@ export default function App() {
   const handleRemoveFromQueue = (id: string) => {
     setQueue(queue.filter(item => item.id !== id));
   }
+  
+  const handleAssignFromQueue = () => {
+    if (queue.length < 2) return;
+    const teamA = queue[0];
+    const teamB = queue[1];
+    setMatchForm(prev => ({
+        ...prev,
+        teamAPlayer1: teamA.players[0],
+        teamAPlayer2: teamA.players[1],
+        teamBPlayer1: teamB.players[0],
+        teamBPlayer2: teamB.players[1],
+    }));
+  };
+  
+  const handleSavePayment = (e: React.FormEvent) => {
+      e.preventDefault();
+      const amount = parseFloat(paymentAmount);
+      if (payingPlayer && !isNaN(amount) && amount > 0) {
+          applyMatchFee([payingPlayer.id], amount, "Manual payment");
+          closePaymentModal();
+      } else {
+          alert("Please enter a valid positive amount.");
+      }
+  };
 
   const unavailablePlayerIdsForQueue = useMemo(() => {
     const ids = new Set<string>();
@@ -476,12 +570,17 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case Tab.DASHBOARD:
-        return <RankingTable rankings={filteredRankings} />;
+        return (
+            <div>
+                <FinancialSummary players={players} />
+                <RankingTable rankings={filteredRankings} />
+            </div>
+        );
       case Tab.PLAYERS:
         return (
             <div>
                 <ActionButton onClick={() => openPlayerModal()}>Add Player</ActionButton>
-                <PlayerList players={filteredPlayers} playerStatuses={playerStatuses} onEdit={openPlayerModal} onDelete={handleDeletePlayer} />
+                <PlayerList players={filteredPlayers} playerStatuses={playerStatuses} onEdit={openPlayerModal} onDelete={handleDeletePlayer} onAddPayment={openPaymentModal}/>
             </div>
         );
       case Tab.COURTS:
@@ -579,7 +678,15 @@ export default function App() {
       {/* --- Modals --- */}
       <Modal isOpen={isPlayerModalOpen} onClose={closePlayerModal} title={editingPlayer ? "Edit Player" : "Add New Player"}>
           <form onSubmit={handleSavePlayer} className="space-y-4">
-              <input type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="Player Name" className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" required />
+              <div>
+                  <label htmlFor="playerName" className="block text-sm font-medium text-slate-400 mb-1">Player Name</label>
+                  <input id="playerName" type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="Player Name" className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" required />
+              </div>
+              <div>
+                  <label htmlFor="initialBalance" className="block text-sm font-medium text-slate-400 mb-1">Initial Balance ($)</label>
+                  <input id="initialBalance" type="number" step="0.01" value={playerInitialBalance} onChange={(e) => setPlayerInitialBalance(e.target.value)} placeholder="0.00" className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" />
+                  <p className="text-xs text-slate-500 mt-1">Set a negative value to represent a joining fee owed.</p>
+              </div>
               <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-md transition-colors">{editingPlayer ? "Save Changes" : "Add Player"}</button>
           </form>
       </Modal>
@@ -598,20 +705,44 @@ export default function App() {
                       {matchModalError}
                   </div>
               )}
+              <div className="relative group">
+                <button 
+                    type="button" 
+                    onClick={handleAssignFromQueue}
+                    disabled={queue.length < 2}
+                    className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition-colors mb-4 disabled:bg-slate-600 disabled:cursor-not-allowed"
+                >
+                    <AutoAssignIcon />
+                    Assign from Queue
+                </button>
+                {queue.length < 2 && (
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-3 py-1 bg-slate-900 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                        At least two teams are needed in the queue.
+                    </div>
+                )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Team A */}
                   <div className="space-y-2 p-3 bg-slate-700/50 rounded-lg">
                       <h3 className="font-bold text-sky-400">Team A</h3>
                       <PlayerSelect players={players} playerStatuses={playerStatuses} value={matchForm.teamAPlayer1} onChange={(e) => setMatchForm({...matchForm, teamAPlayer1: e.target.value})} placeholder="Player 1" />
                       <PlayerSelect players={players} playerStatuses={playerStatuses} value={matchForm.teamAPlayer2} onChange={(e) => setMatchForm({...matchForm, teamAPlayer2: e.target.value})} placeholder="Player 2" />
-                      <input type="number" min="0" value={matchForm.teamAScore} onChange={(e) => setMatchForm({...matchForm, teamAScore: e.target.value})} placeholder="Score" className="w-full bg-slate-700 text-white p-2 rounded-md focus:ring-2 focus:ring-sky-500 outline-none" />
+                      <ScoreStepper
+                          value={matchForm.teamAScore}
+                          onChange={(newScore) => setMatchForm({...matchForm, teamAScore: newScore})}
+                          teamColor="sky"
+                      />
                   </div>
                   {/* Team B */}
                   <div className="space-y-2 p-3 bg-slate-700/50 rounded-lg">
                       <h3 className="font-bold text-red-400">Team B</h3>
                       <PlayerSelect players={players} playerStatuses={playerStatuses} value={matchForm.teamBPlayer1} onChange={(e) => setMatchForm({...matchForm, teamBPlayer1: e.target.value})} placeholder="Player 1" />
                       <PlayerSelect players={players} playerStatuses={playerStatuses} value={matchForm.teamBPlayer2} onChange={(e) => setMatchForm({...matchForm, teamBPlayer2: e.target.value})} placeholder="Player 2" />
-                      <input type="number" min="0" value={matchForm.teamBScore} onChange={(e) => setMatchForm({...matchForm, teamBScore: e.target.value})} placeholder="Score" className="w-full bg-slate-700 text-white p-2 rounded-md focus:ring-2 focus:ring-red-500 outline-none" />
+                      <ScoreStepper
+                          value={matchForm.teamBScore}
+                          onChange={(newScore) => setMatchForm({...matchForm, teamBScore: newScore})}
+                          teamColor="red"
+                      />
                   </div>
               </div>
               <select value={matchForm.courtId} onChange={(e) => setMatchForm({...matchForm, courtId: e.target.value})} className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none">
@@ -628,6 +759,27 @@ export default function App() {
             <PlayerSelect players={players} playerStatuses={playerStatuses} disabledPlayerIds={disabledForQueueP2} value={queueForm.player2} onChange={(e) => setQueueForm({...queueForm, player2: e.target.value})} placeholder="Select Player 2" />
             <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-md transition-colors">Add to Queue</button>
         </form>
+      </Modal>
+
+      <Modal isOpen={isPaymentModalOpen} onClose={closePaymentModal} title={`Add Payment for ${payingPlayer?.name}`}>
+          <form onSubmit={handleSavePayment} className="space-y-4">
+               <div>
+                  <label htmlFor="paymentAmount" className="block text-sm font-medium text-slate-400 mb-1">Payment Amount ($)</label>
+                  <input 
+                    id="paymentAmount" 
+                    type="number" 
+                    step="0.01" 
+                    min="0.01"
+                    value={paymentAmount} 
+                    onChange={(e) => setPaymentAmount(e.target.value)} 
+                    placeholder="20.00" 
+                    className="w-full bg-slate-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 outline-none" 
+                    required 
+                    autoFocus
+                  />
+              </div>
+              <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-4 rounded-md transition-colors">Record Payment</button>
+          </form>
       </Modal>
 
       <Modal isOpen={!!matchAlert} onClose={() => setMatchAlert(null)} title="Match Ready!">
@@ -658,8 +810,38 @@ export default function App() {
 }
 
 // --- Helper & UI Components ---
+const FinancialSummary: React.FC<{ players: Player[] }> = ({ players }) => {
+  const { totalCredit, totalOwed } = useMemo(() => {
+    return players.reduce(
+      (acc, player) => {
+        if (player.balance > 0) {
+          acc.totalCredit += player.balance;
+        } else if (player.balance < 0) {
+          acc.totalOwed += Math.abs(player.balance);
+        }
+        return acc;
+      },
+      { totalCredit: 0, totalOwed: 0 }
+    );
+  }, [players]);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+      <div className="bg-slate-700/50 p-4 rounded-lg">
+        <h3 className="text-sm font-medium text-slate-400">Total Player Credit</h3>
+        <p className="text-2xl font-bold text-green-400">${totalCredit.toFixed(2)}</p>
+      </div>
+      <div className="bg-slate-700/50 p-4 rounded-lg">
+        <h3 className="text-sm font-medium text-slate-400">Total Owed by Players</h3>
+        <p className="text-2xl font-bold text-red-400">${totalOwed.toFixed(2)}</p>
+      </div>
+    </div>
+  );
+};
+
+
 const PlayerStatusIndicator: React.FC<{ status: PlayerStatus }> = ({ status }) => {
-  const baseClasses = "w-2.5 h-2.5 rounded-full inline-block";
+  const baseClasses = "w-2.5 h-2.5 rounded-full inline-block flex-shrink-0";
   const statusConfig = {
     [PlayerStatus.AVAILABLE]: { classes: "bg-green-500", title: "Available" },
     [PlayerStatus.IN_QUEUE]: { classes: "bg-sky-500", title: "In Queue" },
@@ -720,25 +902,34 @@ const RankingTable: React.FC<{ rankings: Ranking[] }> = ({ rankings }) => (
     </div>
 );
 
-const PlayerList: React.FC<{ players: Player[], playerStatuses: Map<string, PlayerStatus>, onEdit: (player: Player) => void, onDelete: (id: string) => void }> = ({ players, playerStatuses, onEdit, onDelete }) => {
+const PlayerList: React.FC<{ players: Player[], playerStatuses: Map<string, PlayerStatus>, onEdit: (player: Player) => void, onDelete: (id: string) => void, onAddPayment: (player: Player) => void }> = ({ players, playerStatuses, onEdit, onDelete, onAddPayment }) => {
     const sortedPlayers = [...players].sort((a,b) => a.name.localeCompare(b.name));
     if (sortedPlayers.length === 0) {
         return <div className="text-center p-8 text-slate-500">No players found.</div>
     }
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {sortedPlayers.map(player => (
-                <div key={player.id} className="bg-slate-700/50 p-4 rounded-lg flex justify-between items-center shadow">
-                    <div className="flex items-center gap-2">
-                        <PlayerStatusIndicator status={playerStatuses.get(player.id) || PlayerStatus.AVAILABLE} />
-                        <span className="font-medium text-slate-300">{player.name} #{player.uniqueId}</span>
+            {sortedPlayers.map(player => {
+                const balanceColor = player.balance > 0 ? 'text-green-400' : player.balance < 0 ? 'text-red-400' : 'text-slate-400';
+                return (
+                    <div key={player.id} className="bg-slate-700/50 p-4 rounded-lg flex justify-between items-center shadow">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <PlayerStatusIndicator status={playerStatuses.get(player.id) || PlayerStatus.AVAILABLE} />
+                                <span className="font-medium text-slate-300">{player.name} #{player.uniqueId}</span>
+                            </div>
+                            <div className={`text-sm font-mono mt-1 ${balanceColor}`}>
+                                Balance: ${player.balance.toFixed(2)}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => onAddPayment(player)} className="text-slate-500 hover:text-green-400 transition-colors" title="Add Payment"><DollarIcon /></button>
+                            <button onClick={() => onEdit(player)} className="text-slate-500 hover:text-cyan-400 transition-colors" title="Edit Player"><EditIcon /></button>
+                            <button onClick={() => onDelete(player.id)} className="text-slate-500 hover:text-red-400 transition-colors" title="Delete Player"><TrashIcon /></button>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => onEdit(player)} className="text-slate-500 hover:text-cyan-400 transition-colors"><EditIcon /></button>
-                        <button onClick={() => onDelete(player.id)} className="text-slate-500 hover:text-red-400 transition-colors"><TrashIcon /></button>
-                    </div>
-                </div>
-            ))}
+                )
+            })}
         </div>
     );
 };
@@ -767,12 +958,16 @@ const MatchHistory: React.FC<{ matches: Match[], getPlayerDisplayName: (id: stri
     if (matches.length === 0) {
         return <div className="text-center p-8 text-slate-500">No matches found.</div>
     }
-    const PlayerNameWithStatus: React.FC<{playerId: string}> = ({playerId}) => (
-        <div className="flex items-center gap-2">
-            <PlayerStatusIndicator status={playerStatuses.get(playerId) || PlayerStatus.AVAILABLE} />
-            <span>{getPlayerDisplayName(playerId)}</span>
-        </div>
-    );
+    const PlayerNameWithStatus: React.FC<{playerId: string}> = ({playerId}) => {
+        const status = playerStatuses.get(playerId) || PlayerStatus.AVAILABLE;
+        const isPlaying = status === PlayerStatus.PLAYING;
+        return (
+            <div className={`inline-flex items-center gap-2 transition-all rounded px-1 my-0.5 ${isPlaying ? 'bg-amber-500/10 ring-1 ring-amber-500/30' : ''}`}>
+                <PlayerStatusIndicator status={status} />
+                <span>{getPlayerDisplayName(playerId)}</span>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-4">
@@ -798,6 +993,7 @@ const MatchHistory: React.FC<{ matches: Match[], getPlayerDisplayName: (id: stri
                                 <div className={`flex-1 p-3 rounded-lg w-full transition-colors flex justify-between items-center ${teamAWon ? 'bg-green-500/20' : ''}`}>
                                     <div className={`${teamAWon ? 'font-bold text-green-400' : 'text-slate-300'}`}>
                                         <PlayerNameWithStatus playerId={match.teamAPlayers[0]} />
+                                        <br/>
                                         <PlayerNameWithStatus playerId={match.teamAPlayers[1]} />
                                     </div>
                                     {teamAWon && <span className="bg-green-500 text-white font-bold text-[10px] px-2 py-1 rounded-full uppercase tracking-wider">WINNER</span>}
@@ -819,8 +1015,9 @@ const MatchHistory: React.FC<{ matches: Match[], getPlayerDisplayName: (id: stri
                                 {/* Team B */}
                                 <div className={`flex-1 p-3 rounded-lg w-full transition-colors flex justify-between items-center ${teamBWon ? 'bg-green-500/20' : ''}`}>
                                     {teamBWon && <span className="bg-green-500 text-white font-bold text-[10px] px-2 py-1 rounded-full uppercase tracking-wider">WINNER</span>}
-                                    <div className={`text-right ${teamBWon ? 'font-bold text-green-400' : 'text-slate-300'}`}>
+                                    <div className={`text-right w-full ${teamBWon ? 'font-bold text-green-400' : 'text-slate-300'}`}>
                                        <PlayerNameWithStatus playerId={match.teamBPlayers[0]} />
+                                       <br/>
                                        <PlayerNameWithStatus playerId={match.teamBPlayers[1]} />
                                     </div>
                                 </div>
@@ -865,6 +1062,87 @@ const QueueList: React.FC<{ queue: QueueItem[], getPlayerDisplayName: (id: strin
     );
 };
 
+const ScoreStepper: React.FC<{
+  value: string;
+  onChange: (newValue: string) => void;
+  teamColor: 'sky' | 'red';
+}> = ({ value, onChange, teamColor }) => {
+  const score = value === '' ? null : Number(value);
+
+  const handleIncrement = () => {
+    const newScore = score === null ? 1 : Math.min(score + 1, 99);
+    onChange(String(newScore));
+  };
+
+  const handleDecrement = () => {
+    if (score === null || score <= 0) {
+      onChange('');
+    } else {
+      onChange(String(score - 1));
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    if (rawValue === '') {
+      onChange('');
+      return;
+    }
+    const numValue = parseInt(rawValue, 10);
+    if (!isNaN(numValue) && numValue >= 0 && numValue <= 99) {
+      onChange(String(numValue));
+    }
+  };
+
+  const colorClasses = {
+    sky: {
+      ring: 'focus-within:ring-sky-500',
+      buttonHover: 'hover:bg-sky-500/20',
+      buttonActive: 'active:bg-sky-500/30',
+      text: 'text-sky-400',
+    },
+    red: {
+      ring: 'focus-within:ring-red-500',
+      buttonHover: 'hover:bg-red-500/20',
+      buttonActive: 'active:bg-red-500/30',
+      text: 'text-red-400',
+    },
+  };
+  const selectedColor = colorClasses[teamColor];
+
+  return (
+    <div className={`flex items-center justify-between bg-slate-700 rounded-md ring-2 ring-transparent transition-shadow ${selectedColor.ring}`}>
+      <button
+        type="button"
+        onClick={handleDecrement}
+        disabled={score === null || score === 0}
+        className={`px-3 py-2 text-2xl font-bold rounded-l-md transition-colors ${selectedColor.buttonHover} ${selectedColor.buttonActive} disabled:text-slate-500 disabled:bg-transparent disabled:cursor-not-allowed`}
+        aria-label="Decrement score"
+      >
+        -
+      </button>
+      <input
+        type="number"
+        min="0"
+        max="99"
+        value={value}
+        onChange={handleChange}
+        placeholder="Score"
+        className="w-full bg-transparent text-white text-center font-bold text-lg p-2 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      <button
+        type="button"
+        onClick={handleIncrement}
+        disabled={score !== null && score >= 99}
+        className={`px-3 py-2 text-2xl font-bold rounded-r-md transition-colors ${selectedColor.buttonHover} ${selectedColor.buttonActive} disabled:text-slate-500 disabled:bg-transparent disabled:cursor-not-allowed`}
+        aria-label="Increment score"
+      >
+        +
+      </button>
+    </div>
+  );
+};
+
 interface PlayerSelectProps {
   players: Player[];
   value: string;
@@ -882,6 +1160,7 @@ const PlayerSelect: React.FC<PlayerSelectProps> = ({ players, value, onChange, p
             const isDisabled = disabledPlayerIds.has(p.id);
             let statusText = '';
             if (status === PlayerStatus.PLAYING) statusText = ' (Playing)';
+            // FIX: Correctly reference the PlayerStatus enum instead of the Player type.
             if (status === PlayerStatus.IN_QUEUE) statusText = ' (In Queue)';
 
             return (
